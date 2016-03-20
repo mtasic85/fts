@@ -1,3 +1,19 @@
+from functools import reduce
+
+#
+# term
+#
+class Term(object):
+    def __init__(self, field_name, value):
+        self.field_name = field_name
+        self.value = value
+
+    def execute(self, model):
+        field = model.fields[self.field_name]
+        value = self.value
+        docs = model.storage.find_by_field_value(model, field, value)
+        return docs
+
 #
 # ops
 #
@@ -6,54 +22,95 @@ class BinOp(object):
         self.operator = operator
         self.operands = operands
 
+    def execute(self, model):
+        raise NotImplementedError
+
 class And(BinOp):
-    def _zinit__(self, *operands):
+    def __init__(self, *operands):
         BinOp.__init__(self, 'AND', operands)
+
+    def execute(self, model):
+        operands_docs = [n.execute(model) for n in self.operands]
+        docs = reduce(lambda a, b: a & b, operands_docs)
+        return docs
 
 class Or(BinOp):
     def __init__(self, *operands):
         BinOp.__init__(self, 'OR', operands)
 
+    def execute(self, model):
+        operands_docs = [n.execute(model) for n in self.operands]
+        docs = reduce(lambda a, b: a | b, operands_docs)
+        return docs
+
 class Xor(BinOp):
     def __init__(self, *operands):
         BinOp.__init__(self, 'XOR', operands)
 
-#
-# term
-#
-class Term(object):
-    def __init__(self, field, value):
-        self.field = field
-        self.value = value
+    def execute(self, model):
+        operands_docs = [n.execute(model) for n in self.operands]
+        docs = reduce(lambda a, b: a ^ b, operands_docs)
+        return docs
 
 #
 # fields
 #
 class Field(object):
-    def __init__(self, name, type_, store):
+    def __init__(self, name, type_, store, model):
         self.name = name
         self.type = type_
         self.store = store
+        self.model = model
 
 class BoolField(Field):
-    def __init__(self, name=None, store=False):
-        Field.__init__(self, name, 'BOOL', store)
+    def __init__(self, name=None, store=False, model=None):
+        Field.__init__(self, name, 'BOOL', store, model)
 
 class IntField(Field):
-    def __init__(self, name=None, store=False):
-        Field.__init__(self, name, 'INT', store)
+    def __init__(self, name=None, store=False, model=None):
+        Field.__init__(self, name, 'INT', store, model)
 
 class FloatField(Field):
-    def __init__(self, name=None, store=False):
-        Field.__init__(self, name, 'FLOAT', store)
+    def __init__(self, name=None, store=False, model=None):
+        Field.__init__(self, name, 'FLOAT', store, model)
 
 class StrField(Field):
-    def __init__(self, name=None, store=False):
-        Field.__init__(self, name, 'STR', store)
+    def __init__(self, name=None, store=False, model=None):
+        Field.__init__(self, name, 'STR', store, model)
 
 class TextField(Field):
-    def __init__(self, name=None, store=True):
-        Field.__init__(self, name, 'TEXT', store)
+    def __init__(self, name=None, store=True, model=None):
+        Field.__init__(self, name, 'TEXT', store, model)
+
+#
+# model
+#
+class Model(object):
+    def __init__(self, _name, _storage, **_fields):
+        self.name = _name
+        self.storage = _storage
+        self.fields = _fields
+
+        # create model via storage 
+        self.storage.create_model(self)
+
+    def add(self, doc, doc_id=None):
+        return self.storage.add(self, doc, doc_id)
+
+    def get(self, doc_id):
+        return self.storage.get(self, doc_id)
+
+    def delete(self, doc_id):
+        self.storage.delete(self, doc_id)
+
+    def search(self, query):
+        return self.storage.search(self, query)
+
+    def commit(self):
+        self.storage.commit(self)
+
+    def close(self):
+        self.storage.close(self)
 
 #
 # storage
@@ -78,6 +135,9 @@ class Storage(object):
         raise NotImplementedError
 
     def search(self, model, query):
+        raise NotImplementedError
+    
+    def find_by_field_value(self, model, field, value):
         raise NotImplementedError
 
     def commit(self):
@@ -134,7 +194,7 @@ class JsonStorage(Storage):
             if not field.store:
                 continue
 
-            t = self.data[model.name][field_name]
+            t = self.data[model.name][field.name]
 
             if field.type == 'TEXT':
                 # build and add ngrams
@@ -155,14 +215,44 @@ class JsonStorage(Storage):
                 except KeyError as e:
                     t[value] = {doc_id}
 
+        return doc_id
+
     def get(self, model, doc_id):
-        pass
+        doc = self.docs[model.name][doc_id]
+        return doc
 
     def delete(self, model, doc_id):
         pass
 
     def search(self, model, query):
-        pass
+        docs = query.execute(model)
+        return docs
+
+    def find_by_field_value(self, model, field, value):
+        docs = set()
+        t = self.data[model.name][field.name]
+
+        if field.type == 'TEXT':
+            # build and find ngrams
+            i = 0
+
+            while i < len(value) - 2:
+                ngram = value[i:i + 3]
+                i += 1
+
+                try:
+                    _docs = t[ngram]
+                    docs.update(_docs)
+                except KeyError as e:
+                    pass
+        else:
+            try:
+                _docs = t[value]
+                docs.update(_docs)
+            except KeyError as e:
+                pass
+
+        return docs
 
     def commit(self, model):
         pass
@@ -171,33 +261,8 @@ class JsonStorage(Storage):
         pass
 
 #
-# model
+# fts
 #
-class Model(object):
-    def __init__(self, _name, _storage, **_fields):
-        self.name = _name
-        self.storage = _storage
-        self.fields = _fields
-        self.storage.create_model(self)
-
-    def add(self, doc, doc_id=None):
-        return self.storage.add(self, doc, doc_id)
-
-    def get(self, doc_id):
-        return self.storage.get(self, doc_id)
-
-    def delete(self, doc_id):
-        self.storage.delete(self, doc_id)
-
-    def search(self, query):
-        return self.storage.search(self, query)
-
-    def commit(self):
-        self.storage.commit(self)
-
-    def close(self):
-        self.storage.close(self)
-
 class FTS(object):
     def __init__(self, storage):
         self.storage = storage
@@ -207,12 +272,15 @@ class FTS(object):
         }
 
     def model(self, _model_name, **_fields):
-        # set names from fields' keys
-        for name, field in _fields.items():
-            field.name = name
-
         model = Model(_model_name, self.storage, **_fields)
-        self.models[_model_name] = model
+
+        # set names from fields' keys
+        # set fields' model from fields' keys
+        for name, field in model.fields.items():
+            field.name = name
+            field.model = model
+
+        self.models[model.name] = model
         return model
 
     def commit(self):
@@ -244,10 +312,14 @@ if __name__ == '__main__':
 
     q = And(
         Term('name', 'ohn'),
-        Term('name', 'mbe'),
+        Or(
+            Term('name', 'mbe'),
+            Term('name', 'obs'),
+        )
     )
 
-    docs = Profile.search(q)
+    docs_ids = Profile.search(q)
+    docs = [Profile.get(doc_id) for doc_id in docs_ids]
     pprint(docs)
 
     fts.close()
