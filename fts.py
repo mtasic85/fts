@@ -75,9 +75,21 @@ class Xor(BinOp):
         BinOp.__init__(self, 'XOR', operands)
 
     def execute(self, model):
-        _vecs = [n.execute(model) for n in self.operands]
-        # vecs = reduce(lambda a, b: a ^ b, _vecs)
-        vecs = reduce(lambda a, b: a + b, _vecs)
+        vecs_list = [n.execute(model) for n in self.operands]
+        vecs = {}
+
+        docs_ids = reduce(lambda p, c: p ^ c, [set(n.keys()) for n in vecs_list])
+
+        for doc_id in docs_ids:
+            for _vecs in vecs_list:
+                if doc_id not in _vecs:
+                    continue
+
+                if doc_id not in vecs:
+                    vecs[doc_id] = []
+
+                vecs[doc_id].extend(_vecs[doc_id])
+        
         return vecs
 
 #
@@ -132,7 +144,8 @@ class Model(object):
         self.storage.delete(self, doc_id)
 
     def search(self, query):
-        return self.storage.search(self, query)
+        vecs = self.storage.search(self, query)
+        return vecs
 
     def commit(self):
         self.storage.commit(self)
@@ -364,7 +377,6 @@ if __name__ == '__main__':
     q = And(
         Term('name', 'ohn'),
         Or(
-            Term('name', 'joh'),
             Term('name', 'mbe'),
             Term('name', 'obs'),
         )
