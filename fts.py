@@ -6,15 +6,15 @@ class BinOp(object):
         self.operator = operator
         self.operands = operands
 
-class AndOp(BinOp):
-    def __init__(self, *operands):
+class And(BinOp):
+    def _zinit__(self, *operands):
         BinOp.__init__(self, 'AND', operands)
 
-class OrOp(BinOp):
+class Or(BinOp):
     def __init__(self, *):
         BinOp.__init__(self, 'OR', operands)
 
-class XorOp(BinOp):
+class Xor(BinOp):
     def __init__(self, *operands):
         BinOp.__init__(self, 'XOR', operands)
 
@@ -60,52 +60,97 @@ class TextField(Field):
 #
 class Storage(object):
     def __init__(self):
-        pass
+        raise NotImplementedError
 
-    def add(self, doc, doc_id=None):
-        return doc_id
+    def create_model(self, model):
+        raise NotImplementedError
 
-    def get(self, doc_id):
-        pass
+    def drop_model(self, model):
+        raise NotImplementedError
 
-    def delete(self, doc_id):
-        pass
+    def add(self, model, doc, doc_id=None):
+        raise NotImplementedError
 
-    def search(self, query):
-        pass
+    def get(self, model, doc_id):
+        raise NotImplementedError
+
+    def delete(self, model, doc_id):
+        raise NotImplementedError
+
+    def search(self, model, query):
+        raise NotImplementedError
+
+    def commit(self):
+        raise NotImplementedError
+
+    def close(self):
+        raise NotImplementedError
 
 class JsonStorage(Storage):
     def __init__(self, path):
         Storage.__init__(self)
         self.path = path
         
-        self.schema = {
-            # 'SCHEMA_NAME_0': schema0
+        self.models = {
+            # 'MODEL_NAME_0': model0,
+            # 'MODEL_NAME_1': model1,
         }
 
-        self.index = {
-            'schema': {
-                # 'SCHEMA_0': {
-                #     'document': {},
-                #     'bool': {},
-                #     'int': {},
-                #     'float': {},
-                #     'string': {},
-                #     'text': {},
-                # }
-            }
+        self.docs = {
+            # 'MODEL_NAME_0': {
+            #    doc_id: doc
+            # }
         }
 
-    def add(self, doc, doc_id=None):
-        return doc_id
+        self.data = {
+            # 'MODEL_NAME_0': {
+            #     'FIELD_0': {},
+            #     'FIELD_1': {},
+            # }
+        }
 
-    def get(self, doc_id):
+    def create_model(self, model):
+        self.models[model.name] = model
+        self.docs[model.name] = {}
+        
+        self.data[model.name] = {
+            field_name: {}
+            for field_name, field in model.fields.items()
+            if field.store
+        }
+
+    def drop_model(self, model):
+        del self.models[model.name]
+        del self.docs[model.name]
+        del self.data[model.name]
+
+    def add(self, model, doc, doc_id=None):
+        self.docs[model.name][doc_id] = doc
+
+        for field_name, value in doc.items():
+            field = model.fields[field_name]
+
+            if not field.store:
+                continue
+
+            try:
+                self.data[model.name][field_name][value].add(doc_id)
+            except KeyError as e:
+                self.data[model.name][field_name][value] = {doc_id}
+
+    def get(self, model, doc_id):
         pass
 
-    def delete(self, doc_id):
+    def delete(self, model, doc_id):
         pass
 
-    def search(self, query):
+    def search(self, model, query):
+        pass
+
+    def commit(self, model):
+        pass
+
+    def close(self, model):
         pass
 
 #
@@ -116,22 +161,30 @@ class Model(object):
         self.name = name
         self.storage = storage
         self.fields = fields
+        self.create_model(self)
 
     def add(self, doc, doc_id=None):
-        return doc_id
+        return self.storage.add(self, doc, doc_id)
 
     def get(self, doc_id):
-        pass
+        return self.storage.get(self, doc_id)
 
     def delete(self, doc_id):
-        pass
+        self.storage.delete(self, doc_id)
 
     def search(self, query):
-        pass
+        return self.storage.search(self, query)
+
+    def commit(self):
+        self.storage.commit(self)
+
+    def close(self):
+        self.storage.close(self)
 
 class FTS(object):
     def __init__(self, storage):
         self.storage = storage
+        self.models = []
 
     def model(self, **fields):
         # set names from fields' keys
@@ -139,7 +192,16 @@ class FTS(object):
             field.name = name
 
         model = Model(**fields)
+        self.models.append(model)
         return model
+
+    def commit(self):
+        for model in self.models:
+            model.commit()
+
+    def close(self):
+        for model in self.models:
+            model.close()
 
 if __name__ == '__main__':
     from pprint import pprint
@@ -158,9 +220,14 @@ if __name__ == '__main__':
         name = '{} {}'.format(choice(first_names), choice(last_names))
         profile_id = Profile.add({'user_id': user_id, 'name': name, 'age': randint(18, 65)}, i)
 
-    q = AndOp(
-        Term('name', ''),
+    fts.commit()
+
+    q = And(
+        Term('name', 'ohn'),
+        Term('name', 'mbe'),
     )
 
     docs = Profile.search(q)
     pprint(docs)
+
+    fts.close()
