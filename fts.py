@@ -355,7 +355,7 @@ if __name__ == '__main__':
 
     for i in range(1000):
         user_id = User.add({'username': 'user{}'.format(i)}, i)
-        name = '{} {}'.format(choice(first_names), choice(last_names))
+        name = '{} {} {}'.format(choice(first_names), choice(first_names), choice(last_names))
         profile_id = Profile.add({'user_id': user_id, 'name': name, 'age': randint(18, 65)}, i)
 
     fts.commit()
