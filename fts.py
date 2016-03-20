@@ -1,5 +1,6 @@
 from functools import reduce
 
+
 #
 # term
 #
@@ -14,6 +15,7 @@ class Term(object):
         vecs = model.storage.find_by_field_value(model, field, value)
         return vecs
 
+
 #
 # ops
 #
@@ -25,15 +27,16 @@ class BinOp(object):
     def execute(self, model):
         raise NotImplementedError
 
+
 class And(BinOp):
     def __init__(self, *operands):
         BinOp.__init__(self, 'AND', operands)
 
     def execute(self, model):
         vecs_list = [n.execute(model) for n in self.operands]
+        docs_ids = [set(n.keys()) for n in vecs_list]
+        docs_ids = reduce(lambda p, c: p & c, docs_ids)
         vecs = {}
-
-        docs_ids = reduce(lambda p, c: p & c, [set(n.keys()) for n in vecs_list])
 
         for doc_id in docs_ids:
             for _vecs in vecs_list:
@@ -54,9 +57,9 @@ class Or(BinOp):
 
     def execute(self, model):
         vecs_list = [n.execute(model) for n in self.operands]
+        docs_ids = [set(n.keys()) for n in vecs_list]
+        docs_ids = reduce(lambda p, c: p | c, docs_ids)
         vecs = {}
-
-        docs_ids = reduce(lambda p, c: p | c, [set(n.keys()) for n in vecs_list])
 
         for doc_id in docs_ids:
             for _vecs in vecs_list:
@@ -67,8 +70,9 @@ class Or(BinOp):
                     vecs[doc_id] = []
 
                 vecs[doc_id].extend(_vecs[doc_id])
-        
+
         return vecs
+
 
 class Xor(BinOp):
     def __init__(self, *operands):
@@ -76,9 +80,9 @@ class Xor(BinOp):
 
     def execute(self, model):
         vecs_list = [n.execute(model) for n in self.operands]
+        docs_ids = [set(n.keys()) for n in vecs_list]
+        docs_ids = reduce(lambda p, c: p ^ c, docs_ids)
         vecs = {}
-
-        docs_ids = reduce(lambda p, c: p ^ c, [set(n.keys()) for n in vecs_list])
 
         for doc_id in docs_ids:
             for _vecs in vecs_list:
@@ -89,8 +93,9 @@ class Xor(BinOp):
                     vecs[doc_id] = []
 
                 vecs[doc_id].extend(_vecs[doc_id])
-        
+
         return vecs
+
 
 #
 # fields
@@ -102,25 +107,31 @@ class Field(object):
         self.store = store
         self.model = model
 
+
 class BoolField(Field):
     def __init__(self, name=None, store=False, model=None):
         Field.__init__(self, name, 'BOOL', store, model)
+
 
 class IntField(Field):
     def __init__(self, name=None, store=False, model=None):
         Field.__init__(self, name, 'INT', store, model)
 
+
 class FloatField(Field):
     def __init__(self, name=None, store=False, model=None):
         Field.__init__(self, name, 'FLOAT', store, model)
+
 
 class StrField(Field):
     def __init__(self, name=None, store=False, model=None):
         Field.__init__(self, name, 'STR', store, model)
 
+
 class TextField(Field):
     def __init__(self, name=None, store=True, model=None):
         Field.__init__(self, name, 'TEXT', store, model)
+
 
 #
 # model
@@ -131,7 +142,7 @@ class Model(object):
         self.storage = _storage
         self.fields = _fields
 
-        # create model via storage 
+        # create model via storage
         self.storage.create_model(self)
 
     def add(self, doc, doc_id=None):
@@ -152,6 +163,7 @@ class Model(object):
 
     def close(self):
         self.storage.close(self)
+
 
 #
 # storage
@@ -177,7 +189,7 @@ class Storage(object):
 
     def search(self, model, query):
         raise NotImplementedError
-    
+
     def find_by_field_value(self, model, field, value):
         raise NotImplementedError
 
@@ -187,11 +199,12 @@ class Storage(object):
     def close(self):
         raise NotImplementedError
 
+
 class JsonStorage(Storage):
     def __init__(self, path):
         Storage.__init__(self)
         self.path = path
-        
+
         self.models = {
             # 'MODEL_NAME_0': model0,
             # 'MODEL_NAME_1': model1,
@@ -213,7 +226,7 @@ class JsonStorage(Storage):
     def create_model(self, model):
         self.models[model.name] = model
         self.docs[model.name] = {}
-        
+
         self.data[model.name] = {
             field_name: {}
             for field_name, field in model.fields.items()
@@ -297,18 +310,18 @@ class JsonStorage(Storage):
 
                 if ngram in t:
                     doc_ranges_map = t[ngram]
-                    
+
                     for doc_id, ranges in doc_ranges_map.items():
                         if doc_id not in vecs:
                             vecs[doc_id] = []
 
                         vecs[doc_id].extend(ranges)
-                
+
                 i += 1
         else:
             if value in t:
                 doc_ranges_map = t[value]
-                
+
                 for doc_id, ranges in doc_ranges_map.items():
                     if doc_id not in vecs:
                         vecs[doc_id] = []
@@ -323,13 +336,14 @@ class JsonStorage(Storage):
     def close(self, model):
         pass
 
+
 #
 # fts
 #
 class FTS(object):
     def __init__(self, storage):
         self.storage = storage
-        
+
         self.models = {
             # MODEL_NAME: model
         }
@@ -357,19 +371,34 @@ class FTS(object):
 if __name__ == '__main__':
     from pprint import pprint
     from random import choice, randint
-    
+
     storage = JsonStorage('example0.json')
     fts = FTS(storage)
-    User = fts.model('User', username=TextField())
-    Profile = fts.model('Profile', user_id=IntField(), name=TextField(), age=IntField())
+
+    User = fts.model('User',
+                     username=TextField())
+
+    Profile = fts.model('Profile',
+                        user_id=IntField(),
+                        name=TextField(),
+                        age=IntField())
 
     first_names = ['Mike', 'John', 'David', 'Rob', 'Ed']
     last_names = ['Doe', 'Timber', 'Smith', 'Gates', 'Jobs']
 
     for i in range(1000):
-        user_id = User.add({'username': 'user{}'.format(i)}, i)
-        name = '{} {} {}'.format(choice(first_names), choice(first_names), choice(last_names))
-        profile_id = Profile.add({'user_id': user_id, 'name': name, 'age': randint(18, 65)}, i)
+        user_doc = {'username': 'user-{}'.format(i)}
+        user_id = User.add(user_doc, i)
+
+        name = '{} {} {}'.format(
+            choice(first_names),
+            choice(first_names),
+            choice(last_names),
+        )
+
+        age = randint(18, 65)
+        profile_doc = {'user_id': user_id, 'name': name, 'age': age}
+        profile_id = Profile.add(profile_doc, i)
 
     fts.commit()
 
