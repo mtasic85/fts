@@ -6,13 +6,13 @@ from functools import reduce
 class Term(object):
     def __init__(self, field_name, value):
         self.field_name = field_name
-        self.value = value
+        self.value = value.lower()
 
     def execute(self, model):
         field = model.fields[self.field_name]
         value = self.value
-        docs = model.storage.find_by_field_value(model, field, value)
-        return docs
+        vecs = model.storage.find_by_field_value(model, field, value)
+        return vecs
 
 #
 # ops
@@ -30,27 +30,55 @@ class And(BinOp):
         BinOp.__init__(self, 'AND', operands)
 
     def execute(self, model):
-        operands_docs = [n.execute(model) for n in self.operands]
-        docs = reduce(lambda a, b: a & b, operands_docs)
-        return docs
+        vecs_list = [n.execute(model) for n in self.operands]
+        vecs = {}
+
+        docs_ids = reduce(lambda p, c: p & c, [set(n.keys()) for n in vecs_list])
+
+        for doc_id in docs_ids:
+            for _vecs in vecs_list:
+                if doc_id not in _vecs:
+                    continue
+
+                if doc_id not in vecs:
+                    vecs[doc_id] = []
+
+                vecs[doc_id].extend(_vecs[doc_id])
+
+        return vecs
+
 
 class Or(BinOp):
     def __init__(self, *operands):
         BinOp.__init__(self, 'OR', operands)
 
     def execute(self, model):
-        operands_docs = [n.execute(model) for n in self.operands]
-        docs = reduce(lambda a, b: a | b, operands_docs)
-        return docs
+        vecs_list = [n.execute(model) for n in self.operands]
+        vecs = {}
+
+        docs_ids = reduce(lambda p, c: p | c, [set(n.keys()) for n in vecs_list])
+
+        for doc_id in docs_ids:
+            for _vecs in vecs_list:
+                if doc_id not in _vecs:
+                    continue
+
+                if doc_id not in vecs:
+                    vecs[doc_id] = []
+
+                vecs[doc_id].extend(_vecs[doc_id])
+        
+        return vecs
 
 class Xor(BinOp):
     def __init__(self, *operands):
         BinOp.__init__(self, 'XOR', operands)
 
     def execute(self, model):
-        operands_docs = [n.execute(model) for n in self.operands]
-        docs = reduce(lambda a, b: a ^ b, operands_docs)
-        return docs
+        _vecs = [n.execute(model) for n in self.operands]
+        # vecs = reduce(lambda a, b: a ^ b, _vecs)
+        vecs = reduce(lambda a, b: a + b, _vecs)
+        return vecs
 
 #
 # fields
@@ -191,6 +219,9 @@ class JsonStorage(Storage):
         for field_name, value in doc.items():
             field = model.fields[field_name]
 
+            if field.type in ('STR', 'TEXT'):
+                value = value.lower()
+
             if not field.store:
                 continue
 
@@ -201,19 +232,31 @@ class JsonStorage(Storage):
                 i = 0
 
                 while i < len(value) - 2:
-                    ngram = value[i:i + 3]
-                    i += 1
+                    s = i
+                    e = i + 3
+                    _range = (s, e)
+                    ngram = value[s:e]
 
-                    try:
-                        t[ngram].add(doc_id)
-                    except KeyError as e:
-                        t[ngram] = {doc_id}
+                    if ngram not in t:
+                        t[ngram] = {}
+
+                    if doc_id not in t[ngram]:
+                        t[ngram][doc_id] = []
+
+                    t[ngram][doc_id].append(_range)
+                    i += 1
             else:
-                # add value
-                try:
-                    t[value].add(doc_id)
-                except KeyError as e:
-                    t[value] = {doc_id}
+                s = 0
+                e = len(value)
+                _range = (s, e)
+
+                if value not in t:
+                    t[value] = {}
+
+                if doc_id not in t[ngram]:
+                    t[value][doc_id] = []
+
+                t[value][doc_id].append(_range)
 
         return doc_id
 
@@ -225,11 +268,11 @@ class JsonStorage(Storage):
         pass
 
     def search(self, model, query):
-        docs = query.execute(model)
-        return docs
+        vecs = query.execute(model)
+        return vecs
 
     def find_by_field_value(self, model, field, value):
-        docs = set()
+        vecs = {}
         t = self.data[model.name][field.name]
 
         if field.type == 'TEXT':
@@ -238,21 +281,28 @@ class JsonStorage(Storage):
 
             while i < len(value) - 2:
                 ngram = value[i:i + 3]
+
+                if ngram in t:
+                    doc_ranges_map = t[ngram]
+                    
+                    for doc_id, ranges in doc_ranges_map.items():
+                        if doc_id not in vecs:
+                            vecs[doc_id] = []
+
+                        vecs[doc_id].extend(ranges)
+                
                 i += 1
-
-                try:
-                    _docs = t[ngram]
-                    docs.update(_docs)
-                except KeyError as e:
-                    pass
         else:
-            try:
-                _docs = t[value]
-                docs.update(_docs)
-            except KeyError as e:
-                pass
+            if value in t:
+                doc_ranges_map = t[value]
+                
+                for doc_id, ranges in doc_ranges_map.items():
+                    if doc_id not in vecs:
+                        vecs[doc_id] = []
 
-        return docs
+                    vecs[doc_id].extend(ranges)
+
+        return vecs
 
     def commit(self, model):
         pass
@@ -310,16 +360,19 @@ if __name__ == '__main__':
 
     fts.commit()
 
+    # search query
     q = And(
         Term('name', 'ohn'),
         Or(
+            Term('name', 'joh'),
             Term('name', 'mbe'),
             Term('name', 'obs'),
         )
     )
 
-    docs_ids = Profile.search(q)
-    docs = [Profile.get(doc_id) for doc_id in docs_ids]
+    vecs = Profile.search(q)
+    pprint(vecs)
+    docs = [Profile.get(doc_id) for doc_id in vecs]
     pprint(docs)
 
     fts.close()
