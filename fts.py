@@ -125,6 +125,7 @@ class JsonStorage(Storage):
         del self.data[model.name]
 
     def add(self, model, doc, doc_id=None):
+        # add document
         self.docs[model.name][doc_id] = doc
 
         for field_name, value in doc.items():
@@ -133,22 +134,26 @@ class JsonStorage(Storage):
             if not field.store:
                 continue
 
+            t = self.data[model.name][field_name]
+
             if field.type == 'TEXT':
+                # build and add ngrams
                 i = 0
 
                 while i < len(value) - 2:
                     ngram = value[i:i + 3]
                     i += 1
 
+                    try:
+                        t[ngram].add(doc_id)
+                    except KeyError as e:
+                        t[ngram] = {doc_id}
+            else:
+                # add value
                 try:
-                    self.data[model.name][field_name][ngram].add(doc_id)
+                    t[value].add(doc_id)
                 except KeyError as e:
-                    self.data[model.name][field_name][ngram] = {doc_id}
-            else:                
-                try:
-                    self.data[model.name][field_name][value].add(doc_id)
-                except KeyError as e:
-                    self.data[model.name][field_name][value] = {doc_id}
+                    t[value] = {doc_id}
 
     def get(self, model, doc_id):
         pass
