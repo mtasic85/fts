@@ -386,6 +386,7 @@ class FTS(object):
         for model in self.models.values():
             model.close()
 
+
 if __name__ == '__main__':
     from pprint import pprint
     from random import choice, randint
@@ -393,6 +394,7 @@ if __name__ == '__main__':
     storage = JsonStorage('example0.json')
     fts = FTS(storage)
 
+    # create models
     User = fts.model('User',
                      username=TextField())
 
@@ -401,6 +403,7 @@ if __name__ == '__main__':
                         name=TextField(),
                         age=IntField())
 
+    # generate and insert some documents
     first_names = ['Mike', 'John', 'David', 'Rob', 'Ed']
     last_names = ['Doe', 'Timber', 'Smith', 'Gates', 'Jobs']
 
