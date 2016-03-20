@@ -1,4 +1,16 @@
 from functools import reduce
+from collections import OrderedDict
+
+
+#
+# score
+#
+class Score(object):
+    pass
+
+
+class FreqScore(Score):
+    pass
 
 
 #
@@ -9,10 +21,10 @@ class Term(object):
         self.field_name = field_name
         self.value = value.lower()
 
-    def execute(self, model):
+    def execute(self, model, score):
         field = model.fields[self.field_name]
         value = self.value
-        vecs = model.storage.find_by_field_value(model, field, value)
+        vecs = model.storage.find_by_field_value(model, field, value, score)
         return vecs
 
 
@@ -24,7 +36,7 @@ class BinOp(object):
         self.operator = operator
         self.operands = operands
 
-    def execute(self, model):
+    def execute(self, model, score):
         raise NotImplementedError
 
 
@@ -32,8 +44,8 @@ class And(BinOp):
     def __init__(self, *operands):
         BinOp.__init__(self, 'AND', operands)
 
-    def execute(self, model):
-        vecs_list = [n.execute(model) for n in self.operands]
+    def execute(self, model, score):
+        vecs_list = [n.execute(model, score) for n in self.operands]
         docs_ids = [set(n.keys()) for n in vecs_list]
         docs_ids = reduce(lambda p, c: p & c, docs_ids)
         vecs = {}
@@ -55,8 +67,8 @@ class Or(BinOp):
     def __init__(self, *operands):
         BinOp.__init__(self, 'OR', operands)
 
-    def execute(self, model):
-        vecs_list = [n.execute(model) for n in self.operands]
+    def execute(self, model, score):
+        vecs_list = [n.execute(model, score) for n in self.operands]
         docs_ids = [set(n.keys()) for n in vecs_list]
         docs_ids = reduce(lambda p, c: p | c, docs_ids)
         vecs = {}
@@ -78,8 +90,8 @@ class Xor(BinOp):
     def __init__(self, *operands):
         BinOp.__init__(self, 'XOR', operands)
 
-    def execute(self, model):
-        vecs_list = [n.execute(model) for n in self.operands]
+    def execute(self, model, score):
+        vecs_list = [n.execute(model, score) for n in self.operands]
         docs_ids = [set(n.keys()) for n in vecs_list]
         docs_ids = reduce(lambda p, c: p ^ c, docs_ids)
         vecs = {}
@@ -154,8 +166,9 @@ class Model(object):
     def delete(self, doc_id):
         self.storage.delete(self, doc_id)
 
-    def search(self, query):
-        vecs = self.storage.search(self, query)
+    def search(self, query, score=None):
+        vecs = self.storage.search(self, query, score)
+
         return vecs
 
     def commit(self):
@@ -178,7 +191,7 @@ class Storage(object):
     def drop_model(self, model):
         raise NotImplementedError
 
-    def add(self, model, doc, doc_id=None):
+    def add(self, model, doc, doc_id):
         raise NotImplementedError
 
     def get(self, model, doc_id):
@@ -187,10 +200,10 @@ class Storage(object):
     def delete(self, model, doc_id):
         raise NotImplementedError
 
-    def search(self, model, query):
+    def search(self, model, query, score):
         raise NotImplementedError
 
-    def find_by_field_value(self, model, field, value):
+    def find_by_field_value(self, model, field, value, score):
         raise NotImplementedError
 
     def commit(self):
@@ -238,7 +251,7 @@ class JsonStorage(Storage):
         del self.docs[model.name]
         del self.data[model.name]
 
-    def add(self, model, doc, doc_id=None):
+    def add(self, model, doc, doc_id):
         # add document
         self.docs[model.name][doc_id] = doc
 
@@ -286,18 +299,23 @@ class JsonStorage(Storage):
 
         return doc_id
 
-    def get(self, model, doc_id):
-        doc = self.docs[model.name][doc_id]
+    def get(self, model, doc_id, default=NotImplemented):
+        if default is NotImplemented:
+            # can raise KeyError
+            doc = self.docs[model.name][doc_id]
+        else:
+            doc = self.docs[model.name].get(doc_id, default)
+
         return doc
 
     def delete(self, model, doc_id):
-        pass
+        del self.docs[model.name][doc_id]
 
-    def search(self, model, query):
-        vecs = query.execute(model)
+    def search(self, model, query, score):
+        vecs = query.execute(model, score)
         return vecs
 
-    def find_by_field_value(self, model, field, value):
+    def find_by_field_value(self, model, field, value, score):
         vecs = {}
         t = self.data[model.name][field.name]
 
@@ -411,7 +429,7 @@ if __name__ == '__main__':
         )
     )
 
-    vecs = Profile.search(q)
+    vecs = Profile.search(q, score=FreqScore)
     pprint(vecs)
     docs = [Profile.get(doc_id) for doc_id in vecs]
     pprint(docs)
