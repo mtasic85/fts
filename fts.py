@@ -11,7 +11,7 @@ class And(BinOp):
         BinOp.__init__(self, 'AND', operands)
 
 class Or(BinOp):
-    def __init__(self, *):
+    def __init__(self, *operands):
         BinOp.__init__(self, 'OR', operands)
 
 class Xor(BinOp):
@@ -52,7 +52,7 @@ class StrField(Field):
         Field.__init__(self, name, 'STR', store)
 
 class TextField(Field):
-    def __init__(self, name=None):
+    def __init__(self, name=None, store=True):
         Field.__init__(self, name, 'TEXT', store)
 
 #
@@ -60,7 +60,7 @@ class TextField(Field):
 #
 class Storage(object):
     def __init__(self):
-        raise NotImplementedError
+        pass
 
     def create_model(self, model):
         raise NotImplementedError
@@ -133,10 +133,22 @@ class JsonStorage(Storage):
             if not field.store:
                 continue
 
-            try:
-                self.data[model.name][field_name][value].add(doc_id)
-            except KeyError as e:
-                self.data[model.name][field_name][value] = {doc_id}
+            if field.type == 'TEXT':
+                i = 0
+
+                while i < len(value) - 2:
+                    ngram = value[i:i + 3]
+                    i += 1
+
+                try:
+                    self.data[model.name][field_name][ngram].add(doc_id)
+                except KeyError as e:
+                    self.data[model.name][field_name][ngram] = {doc_id}
+            else:                
+                try:
+                    self.data[model.name][field_name][value].add(doc_id)
+                except KeyError as e:
+                    self.data[model.name][field_name][value] = {doc_id}
 
     def get(self, model, doc_id):
         pass
@@ -157,11 +169,11 @@ class JsonStorage(Storage):
 # model
 #
 class Model(object):
-    def __init__(self, name, storage, **fields):
-        self.name = name
-        self.storage = storage
-        self.fields = fields
-        self.create_model(self)
+    def __init__(self, _name, _storage, **_fields):
+        self.name = _name
+        self.storage = _storage
+        self.fields = _fields
+        self.storage.create_model(self)
 
     def add(self, doc, doc_id=None):
         return self.storage.add(self, doc, doc_id)
@@ -184,23 +196,26 @@ class Model(object):
 class FTS(object):
     def __init__(self, storage):
         self.storage = storage
-        self.models = []
+        
+        self.models = {
+            # MODEL_NAME: model
+        }
 
-    def model(self, **fields):
+    def model(self, _model_name, **_fields):
         # set names from fields' keys
-        for name, field in fields.items():
+        for name, field in _fields.items():
             field.name = name
 
-        model = Model(**fields)
-        self.models.append(model)
+        model = Model(_model_name, self.storage, **_fields)
+        self.models[_model_name] = model
         return model
 
     def commit(self):
-        for model in self.models:
+        for model in self.models.values():
             model.commit()
 
     def close(self):
-        for model in self.models:
+        for model in self.models.values():
             model.close()
 
 if __name__ == '__main__':
